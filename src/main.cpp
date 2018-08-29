@@ -119,18 +119,6 @@ void cleanup_globals()
 void read_options(int argc, char** argv);
 void read_options(int argc, char** argv)
 {
-    options().add_options()(
-        OPTION_CLIENTS,
-        po::value<std::int64_t>(),
-        "The number of clients to start.")(
-        OPTION_SERVERS,
-        po::value<std::int64_t>(),
-        "The number of servers to start.")(
-        OPTION_SOCKET_PATH, po::value<std::string>(), "The ipc socket path.")(
-        OPTION_ENDPOINT,
-        po::value<std::vector<std::string>>()->multitoken(),
-        "Tcp endpoint(s).");
-
     try {
         po::store(po::parse_command_line(argc, argv, options()), variables());
         po::notify(variables());
