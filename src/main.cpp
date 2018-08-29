@@ -1,6 +1,6 @@
 // Copyright (c) Stash Inc. 2018 All rights reserved
 
-#include <boost/filesystem/fstream.hpp>
+#include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
@@ -29,12 +29,21 @@ namespace po = boost::program_options;
 namespace pt = boost::property_tree;
 namespace fs = boost::filesystem;
 
+// Prepend the section name (and a dot) to the option name.
+std::string config_option_name(const char* name);
+std::string config_option_name(const char* name)
+{
+    return std::string("otagent.") + name;
+}
+
 void cleanup_globals();
 po::variables_map& variables();
-po::options_description& options();
+po::options_description& options();         // command line options
+po::options_description& config_options();  // config file options
 
 static po::variables_map* variables_{};
 static po::options_description* options_{};
+static po::options_description* config_options_{};
 
 po::variables_map& variables()
 {
@@ -46,10 +55,47 @@ po::variables_map& variables()
 po::options_description& options()
 {
     if (nullptr == options_) {
-        options_ = new po::options_description{"otagent options"};
+        options_ = new po::options_description{"otagent"};
+        options_->add_options()(
+            OPTION_CLIENTS,
+            po::value<std::int64_t>(),
+            "The number of clients to start.")(
+            OPTION_SERVERS,
+            po::value<std::int64_t>(),
+            "The number of servers to start.")(
+            OPTION_SOCKET_PATH,
+            po::value<std::string>(),
+            "The ipc socket path.")(
+            OPTION_ENDPOINT,
+            po::value<std::vector<std::string>>()->multitoken(),
+            "Tcp endpoint(s).");
     }
 
     return *options_;
+}
+
+po::options_description& config_options()
+{
+    // When parsing a config file, the parser combines the section name and the
+    // option name, e.g. otagent.clients
+    if (nullptr == options_) {
+        config_options_ = new po::options_description{};
+        config_options_->add_options()(
+            config_option_name(OPTION_CLIENTS).c_str(),
+            po::value<std::int64_t>(),
+            "The number of clients to start.")(
+            config_option_name(OPTION_SERVERS).c_str(),
+            po::value<std::int64_t>(),
+            "The number of servers to start.")(
+            config_option_name(OPTION_SOCKET_PATH).c_str(),
+            po::value<std::string>(),
+            "The ipc socket path.")(
+            config_option_name(OPTION_ENDPOINT).c_str(),
+            po::value<std::string>()->multitoken(),
+            "Tcp endpoint(s).");
+    }
+
+    return *config_options_;
 }
 
 void cleanup_globals()
@@ -62,6 +108,11 @@ void cleanup_globals()
     if (nullptr != options_) {
         delete options_;
         options_ = nullptr;
+    }
+
+    if (nullptr != config_options_) {
+        delete config_options_;
+        config_options_ = nullptr;
     }
 }
 
@@ -86,6 +137,59 @@ void read_options(int argc, char** argv)
     } catch (po::error& e) {
         std::cerr << "ERROR: " << e.what() << "\n\n" << options() << std::endl;
     }
+}
+
+void read_config_options(std::string config_file_name);
+void read_config_options(std::string config_file_name)
+{
+    try {
+        fs::ifstream config_file(config_file_name);
+        po::store(
+            po::parse_config_file(config_file, config_options()), variables());
+        po::notify(variables());
+    } catch (po::error& e) {
+        std::cerr << "ERROR: " << e.what() << "\n\n"
+                  << config_options() << std::endl;
+    }
+}
+
+std::int64_t max_option_value(std::string name);
+std::int64_t max_option_value(std::string name)
+{
+    std::int64_t command_line_value = 0;
+    std::int64_t config_file_value = 0;
+
+    if (!variables()[name].empty()) {
+        command_line_value = variables()[name].as<std::int64_t>();
+    }
+
+    std::string config_name = config_option_name(name.c_str());
+    if (!variables()[config_name].empty()) {
+        config_file_value = variables()[config_name].as<std::int64_t>();
+    }
+
+    return std::max(command_line_value, config_file_value);
+}
+
+// Converts a string containing multiple items separated by a space to a vector.
+std::vector<std::string> string_to_vector(std::string s);
+std::vector<std::string> string_to_vector(std::string s)
+{
+    std::vector<std::string> v;
+
+    std::size_t start = 0;
+    std::size_t end = std::string::npos;
+
+    while (end = s.find(' ', start), end != std::string::npos) {
+        v.emplace_back(s.substr(start, end - start));
+        while (s[++end] == ' ')  // In case there are multiple spaces.
+            ;
+        start = end;
+    }
+
+    if (0 < start) { v.emplace_back(s.substr(start)); }
+
+    return v;
 }
 
 std::string find_home();
@@ -128,30 +232,80 @@ int main(int argc, char** argv)
 
     auto settings_path = find_home() + "/.otagent";
 
+    read_config_options(settings_path);
+
     read_options(argc, argv);
     auto opts = variables();
 
-    auto& opt_clients = opts[OPTION_CLIENTS];
-    auto& opt_servers = opts[OPTION_SERVERS];
-    auto& opt_socket_path = opts[OPTION_SOCKET_PATH];
-    auto& opt_endpoints = opts[OPTION_ENDPOINT];
+    // Use the max of the values from the command line and the config file.
+    std::int64_t clients = max_option_value(OPTION_CLIENTS);
+    std::int64_t servers = max_option_value(OPTION_SERVERS);
+    // Once the socket_path is saved to the config file, don't change the value
+    // in the file.
+    std::string config_socket_path;
+    if (!variables()[config_option_name(OPTION_SOCKET_PATH)].empty()) {
+        config_socket_path = variables()[config_option_name(OPTION_SOCKET_PATH)]
+                                 .as<std::string>();
+    }
+    std::string socket_path = config_socket_path;
+    // Use the socket_path from the command line, if it exists.
+    if (!variables()[OPTION_SOCKET_PATH].empty()) {
+        socket_path = variables()[OPTION_SOCKET_PATH].as<std::string>();
+    }
 
-    std::int64_t clients;
-    if (!opt_clients.empty()) clients = opt_clients.as<std::int64_t>();
-    std::int64_t servers;
-    if (!opt_servers.empty()) servers = opt_servers.as<std::int64_t>();
-    std::string socket_path;
-    if (!opt_socket_path.empty())
-        socket_path = opt_socket_path.as<std::string>();
+    // Use a default socket path.
+    if (socket_path.empty()) {
+        std::string uid = std::to_string(getuid());
+        std::string dir = "/run/user/" + uid;
+        fs::path path(dir);
+        fs::file_status status = fs::status(path);
+        if (0 != (status.permissions() & fs::owner_write)) {
+            socket_path = dir + "/otagent.sock";
+        } else {
+            dir = "/tmp/user/" + uid;
+            path = dir;
+            status = fs::status(path);
+            if (0 != (status.permissions() & fs::owner_write)) {
+                socket_path = dir + "/otagent.sock";
+            }
+        }
+    }
+
+    // Combine the endpoints from the command line and the config file.
     std::vector<std::string> endpoints;
-    if (!opt_endpoints.empty())
-        endpoints = opt_endpoints.as<std::vector<std::string>>();
+    if (!variables()[config_option_name(OPTION_ENDPOINT)].empty()) {
+        auto config_endpoints_string =
+            variables()[config_option_name(OPTION_ENDPOINT)].as<std::string>();
+        auto config_endpoints = string_to_vector(config_endpoints_string);
+        for (auto& ep : config_endpoints) {
+            if (std::find(endpoints.begin(), endpoints.end(), ep) ==
+                endpoints.end()) {
+                endpoints.emplace_back(ep);
+            }
+        }
+    }
+    if (!variables()[OPTION_ENDPOINT].empty()) {
+        auto command_endoints =
+            variables()[OPTION_ENDPOINT].as<std::vector<std::string>>();
+        for (auto& ep : command_endoints) {
+            if (std::find(endpoints.begin(), endpoints.end(), ep) ==
+                endpoints.end()) {
+                endpoints.emplace_back(ep);
+            }
+        }
+    }
 
     pt::ptree root;
     pt::ptree section;
     section.put(OPTION_CLIENTS, clients);
     section.put(OPTION_SERVERS, servers);
-    section.put(OPTION_SOCKET_PATH, socket_path);
+    // Only save the socket_path from the command line if it hasn't been
+    // saved before.
+    section.put(
+        OPTION_SOCKET_PATH,
+        config_socket_path.empty() ? socket_path : config_socket_path);
+    // Save the endpoints as a single entry in the config file, with the
+    // endpoints separated by spaces.
     std::string endpoints_string = endpoints[0];
     for (auto& ep :
          std::vector<std::string>(++endpoints.begin(), endpoints.end()))
@@ -162,7 +316,6 @@ int main(int argc, char** argv)
 
     fs::fstream settingsfile(settings_path, std::ios::out);
     pt::write_ini(settingsfile, root);
-    settingsfile.flush();
     settingsfile.close();
 
     std::unique_ptr<opentxs::Agent> otagent;

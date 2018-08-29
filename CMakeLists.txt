@@ -89,7 +89,7 @@ find_package(Threads REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(opentxs-proto REQUIRED)
 find_package(opentxs REQUIRED)
-find_package(Boost REQUIRED program_options system)
+find_package(Boost REQUIRED program_options filesystem system)
 
 if(BUILD_TESTS)
   find_package(GTest REQUIRED)
