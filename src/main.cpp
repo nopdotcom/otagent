@@ -1,0 +1,185 @@
+// Copyright (c) Stash Inc. 2018 All rights reserved
+
+#include <boost/filesystem/fstream.hpp>
+#include <boost/program_options.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/ini_parser.hpp>
+
+#include <csignal>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <thread>
+
+extern "C" {
+#include <pwd.h>
+#include <unistd.h>
+}
+
+#include "Agent.hpp"
+
+#define OT_STORAGE_GC_SECONDS 3600
+
+#define OPTION_CLIENTS "clients"
+#define OPTION_SERVERS "servers"
+#define OPTION_SOCKET_PATH "socket-path"
+#define OPTION_ENDPOINT "endpoint"
+
+namespace po = boost::program_options;
+namespace pt = boost::property_tree;
+namespace fs = boost::filesystem;
+
+void cleanup_globals();
+po::variables_map& variables();
+po::options_description& options();
+
+static po::variables_map* variables_{};
+static po::options_description* options_{};
+
+po::variables_map& variables()
+{
+    if (nullptr == variables_) { variables_ = new po::variables_map; }
+
+    return *variables_;
+}
+
+po::options_description& options()
+{
+    if (nullptr == options_) {
+        options_ = new po::options_description{"otagent options"};
+    }
+
+    return *options_;
+}
+
+void cleanup_globals()
+{
+    if (nullptr != variables_) {
+        delete variables_;
+        variables_ = nullptr;
+    }
+
+    if (nullptr != options_) {
+        delete options_;
+        options_ = nullptr;
+    }
+}
+
+void read_options(int argc, char** argv);
+void read_options(int argc, char** argv)
+{
+    options().add_options()(
+        OPTION_CLIENTS,
+        po::value<std::int64_t>(),
+        "The number of clients to start.")(
+        OPTION_SERVERS,
+        po::value<std::int64_t>(),
+        "The number of servers to start.")(
+        OPTION_SOCKET_PATH, po::value<std::string>(), "The ipc socket path.")(
+        OPTION_ENDPOINT,
+        po::value<std::vector<std::string>>()->multitoken(),
+        "Tcp endpoint(s).");
+
+    try {
+        po::store(po::parse_command_line(argc, argv, options()), variables());
+        po::notify(variables());
+    } catch (po::error& e) {
+        std::cerr << "ERROR: " << e.what() << "\n\n" << options() << std::endl;
+    }
+}
+
+std::string find_home();
+std::string find_home()
+{
+    std::string home_directory;
+#ifdef __APPLE__
+    home_directory = opentxs::OTPaths::AppDataFolder().Get();
+#else
+    std::string environment;
+    const char* env = getenv("HOME");
+
+    if (nullptr != env) { environment.assign(env); }
+
+    if (!environment.empty()) {
+        home_directory = environment;
+    } else {
+        passwd* entry = getpwuid(getuid());
+        const char* password = entry->pw_dir;
+        home_directory.assign(password);
+    }
+
+    if (home_directory.empty()) {
+        opentxs::otErr << __FUNCTION__
+                       << ": Unable to determine the home directory."
+                       << std::endl;
+    }
+#endif
+    return home_directory;
+}
+
+int main(int argc, char** argv)
+{
+    opentxs::ArgList args;
+
+    opentxs::Signals::Block();
+
+    const auto& app =
+        opentxs::OT::Start(args, std::chrono::seconds(OT_STORAGE_GC_SECONDS));
+
+    auto settings_path = find_home() + "/.otagent";
+
+    read_options(argc, argv);
+    auto opts = variables();
+
+    auto& opt_clients = opts[OPTION_CLIENTS];
+    auto& opt_servers = opts[OPTION_SERVERS];
+    auto& opt_socket_path = opts[OPTION_SOCKET_PATH];
+    auto& opt_endpoints = opts[OPTION_ENDPOINT];
+
+    std::int64_t clients;
+    if (!opt_clients.empty()) clients = opt_clients.as<std::int64_t>();
+    std::int64_t servers;
+    if (!opt_servers.empty()) servers = opt_servers.as<std::int64_t>();
+    std::string socket_path;
+    if (!opt_socket_path.empty())
+        socket_path = opt_socket_path.as<std::string>();
+    std::vector<std::string> endpoints;
+    if (!opt_endpoints.empty())
+        endpoints = opt_endpoints.as<std::vector<std::string>>();
+
+    pt::ptree root;
+    pt::ptree section;
+    section.put(OPTION_CLIENTS, clients);
+    section.put(OPTION_SERVERS, servers);
+    section.put(OPTION_SOCKET_PATH, socket_path);
+    std::string endpoints_string = endpoints[0];
+    for (auto& ep :
+         std::vector<std::string>(++endpoints.begin(), endpoints.end()))
+        endpoints_string += ' ' + ep;
+    section.put(OPTION_ENDPOINT, endpoints_string);
+
+    root.push_front(pt::ptree::value_type("otagent", section));
+
+    fs::fstream settingsfile(settings_path, std::ios::out);
+    pt::write_ini(settingsfile, root);
+    settingsfile.flush();
+    settingsfile.close();
+
+    std::unique_ptr<opentxs::Agent> otagent;
+    otagent.reset(
+        new opentxs::Agent(app, clients, servers, socket_path, endpoints));
+
+    std::function<void()> shutdowncallback = [&otagent]() -> void {
+        opentxs::otOut << std::endl << "Shutting down..." << std::endl;
+        otagent.reset();
+    };
+    opentxs::OT::App().HandleSignals(&shutdowncallback);
+
+    opentxs::OT::Join();
+
+    opentxs::otOut << "Finished." << std::endl;
+
+    cleanup_globals();
+
+    return 0;
+}
