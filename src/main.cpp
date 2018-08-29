@@ -159,7 +159,7 @@ std::int64_t max_option_value(std::string name)
     return std::max(command_line_value, config_file_value);
 }
 
-// Converts a string containing multiple items separated by a space to a vector.
+// Converts a string containing multiple items separated by spaces to a vector.
 std::vector<std::string> string_to_vector(std::string s);
 std::vector<std::string> string_to_vector(std::string s)
 {
@@ -168,7 +168,9 @@ std::vector<std::string> string_to_vector(std::string s)
     std::size_t start = 0;
     std::size_t end = std::string::npos;
 
-    while (end = s.find(' ', start), end != std::string::npos) {
+    // static_cast gets rid of a clang compiler warning
+    while (static_cast<void>(end = s.find(' ', start)),
+           end != std::string::npos) {
         v.emplace_back(s.substr(start, end - start));
         while (s[++end] == ' ')  // In case there are multiple spaces.
             ;
@@ -294,12 +296,13 @@ int main(int argc, char** argv)
         config_socket_path.empty() ? socket_path : config_socket_path);
     // Save the endpoints as a single entry in the config file, with the
     // endpoints separated by spaces.
-    std::string endpoints_string = endpoints[0];
-    for (auto& ep :
-         std::vector<std::string>(++endpoints.begin(), endpoints.end()))
-        endpoints_string += ' ' + ep;
-    section.put(OPTION_ENDPOINT, endpoints_string);
-
+    if (0 < endpoints.size()) {
+        std::string endpoints_string = endpoints[0];
+        for (auto& ep :
+             std::vector<std::string>(++endpoints.begin(), endpoints.end()))
+            endpoints_string += ' ' + ep;
+        section.put(OPTION_ENDPOINT, endpoints_string);
+    }
     root.push_front(pt::ptree::value_type("otagent", section));
 
     fs::fstream settingsfile(settings_path, std::ios::out);
@@ -307,8 +310,8 @@ int main(int argc, char** argv)
     settingsfile.close();
 
     std::unique_ptr<opentxs::Agent> otagent;
-    otagent.reset(
-        new opentxs::Agent(app, clients, servers, socket_path, endpoints));
+    otagent.reset(new opentxs::Agent(
+        app, clients, servers, socket_path, endpoints, settings_path));
 
     std::function<void()> shutdowncallback = [&otagent]() -> void {
         opentxs::otOut << std::endl << "Shutting down..." << std::endl;
