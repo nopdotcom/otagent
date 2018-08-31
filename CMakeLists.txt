@@ -1,5 +1,12 @@
-cmake_minimum_required(VERSION 2.8)
+#[[
+// clang-format off
+]]#
+# Copyright (c) 2018 The Open-Transactions developers
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+cmake_minimum_required(VERSION 3.5)
 project(otagent)
 
 find_package(Git)
@@ -37,7 +44,7 @@ endif()
 #-----------------------------------------------------------------------------
 # Print system information
 
-message(STATUS "otagent version:   			  ${VERSION_STRING}")
+message(STATUS "otagent version:              ${VERSION_STRING}")
 message(STATUS "CMake version:                ${CMAKE_VERSION}")
 message(STATUS "System:                       ${CMAKE_SYSTEM}")
 message(STATUS "Processor:                    ${CMAKE_SYSTEM_PROCESSOR}")
@@ -51,25 +58,30 @@ message(STATUS "Package Vendor:               ${PACKAGE_VENDOR}")
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
 #-----------------------------------------------------------------------------
-# Check which compiler to use
+# Compile options
+
+set(CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(PEDANTIC_CXX_FLAGS "-Werror")
+set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -std=c11")
 
 if(${CMAKE_CXX_COMPILER_ID} MATCHES GNU)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
-  set(COMPILER_EXTRA_FLAGS "")
+  set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Wall -Wextra -pedantic -pedantic-errors -Wswitch-default -Wswitch-enum -Wcast-align -Wdisabled-optimization -Wmissing-declarations -Wmissing-field-initializers -Wunused-macros -Wundef -Wformat=2 -Wlogical-op -Wmissing-include-dirs")
+  set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Weffc++ -Wctor-dtor-privacy -Wold-style-cast -Woverloaded-virtual -Wsynth -Wnoexcept -Wstrict-null-sentinel")
 elseif(${CMAKE_CXX_COMPILER_ID} MATCHES Clang)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1z")
-  set(COMPILER_EXTRA_FLAGS "-Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-padded -Wno-weak-vtables -Wno-disabled-macro-expansion -Wno-sign-conversion -Wno-float-conversion -Wno-unused-private-field -Wno-covered-switch-default")
-else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
-  set(COMPILER_EXTRA_FLAGS "")
+  set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Weverything -Wno-c++98-compat-pedantic -Wno-padded -Wno-weak-vtables -Wno-disabled-macro-expansion -Wno-sign-conversion -Wno-float-conversion -Wno-covered-switch-default")
 endif()
 
-set(PEDANTIC_CXX_FLAGS "-Wall -Werror -Wextra -pedantic -pedantic-errors -Wswitch-enum -Wmissing-braces -Wcast-align -Wctor-dtor-privacy -Wdisabled-optimization -Winit-self -Wswitch-default -Wold-style-cast -Woverloaded-virtual -Wmissing-declarations -Wunused-macros -Wundef -Wformat=2 -Wno-format-nonliteral ${COMPILER_EXTRA_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${PEDANTIC_CXX_FLAGS}")
 
-message(STATUS "C++ Compiler ID: ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "C++ Flags:       ${CMAKE_CXX_FLAGS}")
-message(STATUS "C++ link flags:  ${CMAKE_CXX_LINK_FLAGS}")
+message(STATUS "C Compiler ID:      ${CMAKE_C_COMPILER_ID}")
+message(STATUS "C Flags:            ${CMAKE_C_FLAGS}")
+message(STATUS "C link flags:       ${CMAKE_C_LINK_FLAGS}")
+message(STATUS "C++ Compiler ID:    ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "C++ Flags:          ${CMAKE_CXX_FLAGS}")
+message(STATUS "C++ link flags:     ${CMAKE_CXX_LINK_FLAGS}")
 
 #-----------------------------------------------------------------------------
 # System libraries used for linking.
@@ -134,8 +146,6 @@ LIST(APPEND CMAKE_PREFIX_PATH "/usr/local/share/cmake/Modules")
 
 add_definitions(-D_XOPEN_SOURCE=700)
 
-#include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-
 add_subdirectory(src)
 
 
@@ -156,3 +166,6 @@ configure_file(
 add_custom_target(uninstall
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/uninstall.cmake)
 
+#[[
+// clang-format on
+]]#
