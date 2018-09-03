@@ -8,13 +8,14 @@
 
 #include <gtest/gtest.h>
 
-class OTTestEnvironment : public testing::Environment {
+class OTTestEnvironment : public testing::Environment
+{
 public:
-  virtual ~OTTestEnvironment();
+    virtual ~OTTestEnvironment();
 
-  virtual void SetUp();
+    virtual void SetUp();
 
-  virtual void TearDown();
+    virtual void TearDown();
 };
 
 #endif /* TESTS_OTTESTENVIRONMENT_HPP_ */
