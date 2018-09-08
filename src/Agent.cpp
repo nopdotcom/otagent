@@ -97,13 +97,12 @@ std::vector<std::string> Agent::backend_endpoint_generator()
 
 OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
 {
-    OT_ASSERT(1 > message.Body().size());
+    OT_ASSERT(0 < message.Body().size());
 
     const auto& frame = message.Body().at(0);
     const auto data = Data::Factory(frame.data(), frame.size());
     opentxs::proto::RPCCommand command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
-
     auto response = app_.RPC(command);
 
     switch (response.type()) {
