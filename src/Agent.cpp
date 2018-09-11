@@ -15,9 +15,14 @@
 #define CONFIG_SECTION "otagent"
 #define CONFIG_CLIENTS "clients"
 #define CONFIG_SERVERS "servers"
+#define CONFIG_SERVER_PRIVKEY "server_privkey"
+#define CONFIG_SERVER_PUBKEY "server_pubkey"
+#define CONFIG_CLIENT_PRIVKEY "client_privkey"
+#define CONFIG_CLIENT_PUBKEY "client_pubkey"
 
-namespace pt = boost::property_tree;
 namespace fs = boost::filesystem;
+
+#define ZAP_DOMAIN "otagent"
 
 #define OT_METHOD "opentxs::Agent::"
 
@@ -29,8 +34,13 @@ Agent::Agent(
     const std::int64_t servers,
     const std::string& socket_path,
     const std::vector<std::string>& endpoints,
-    const std::string& settings_path)
-    : app_(app)
+    const std::string& serverPrivateKey,
+    const std::string& serverPublicKey,
+    const std::string& clientPrivateKey,
+    const std::string& clientPublicKey,
+    const std::string& settings_path,
+    pt::ptree& config)
+    : ot_(app)
     , zmq_(app.ZMQ())
     , clients_(clients)
     , internal_callback_(network::zeromq::ListenCallback::Factory(
@@ -48,12 +58,28 @@ Agent::Agent(
     , servers_(servers)
     , settings_path_(settings_path)
     , socket_path_(socket_path)
+    , config_lock_()
+    , config_(config)
+    , server_privkey_(serverPrivateKey)
+    , server_pubkey_(serverPublicKey)
+    , client_privkey_(clientPrivateKey)
+    , client_pubkey_(clientPublicKey)
 {
-    for (auto i = 0; i < servers_; ++i) {
-        app_.StartServer(ArgList(), i, false);
+    {
+        Lock lock(config_lock_);
+        auto& section = config.get_child(CONFIG_SECTION);
+        section.put(CONFIG_SERVER_PRIVKEY, server_privkey_);
+        section.put(CONFIG_SERVER_PUBKEY, server_pubkey_);
+        section.put(CONFIG_CLIENT_PRIVKEY, client_privkey_);
+        section.put(CONFIG_CLIENT_PUBKEY, client_pubkey_);
+        save_config(lock);
     }
 
-    for (auto i = 0; i < clients_; ++i) { app_.StartClient(ArgList(), i); }
+    for (auto i = 0; i < servers_; ++i) {
+        ot_.StartServer(ArgList(), i, false);
+    }
+
+    for (auto i = 0; i < clients_; ++i) { ot_.StartClient(ArgList(), i); }
 
     OT_ASSERT(0 < backend_endpoints_.size());
 
@@ -66,6 +92,20 @@ Agent::Agent(
     }
 
     OT_ASSERT(false == socket_path_.empty());
+
+    const auto zap = ot_.ZAP().RegisterDomain(
+        ZAP_DOMAIN,
+        std::bind(&Agent::zap_handler, this, std::placeholders::_1));
+
+    OT_ASSERT(zap);
+
+    const auto domain = frontend_->SetDomain(ZAP_DOMAIN);
+
+    OT_ASSERT(domain);
+
+    const bool set = frontend_->SetPrivateKey(server_privkey_);
+
+    OT_ASSERT(set);
 
     started = frontend_->Start("ipc://" + socket_path_);
 
@@ -103,7 +143,7 @@ OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
     const auto data = Data::Factory(frame.data(), frame.size());
     opentxs::proto::RPCCommand command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
-    auto response = app_.RPC(command);
+    auto response = ot_.RPC(command);
 
     switch (response.type()) {
         case proto::RPCCOMMAND_ADDCLIENTSESSION: {
@@ -184,43 +224,57 @@ void Agent::frontend_handler(network::zeromq::Message& message)
     internal_->Send(message);
 }
 
+void Agent::increment_config_value(
+    const std::string& sectionName,
+    const std::string& entryName)
+{
+    Lock lock(config_lock_);
+    pt::ptree& section = config_.get_child(sectionName);
+    pt::ptree& entry = section.get_child(entryName);
+    auto value = entry.get_value<std::int64_t>();
+    entry.put_value<std::int64_t>(++value);
+    save_config(lock);
+}
+
 void Agent::internal_handler(network::zeromq::Message& message)
 {
     // Route replies back to original requestor via frontend socket
     frontend_->Send(message);
 }
 
+void Agent::save_config(const Lock& lock)
+{
+    fs::fstream settingsfile(settings_path_, std::ios::out);
+    pt::write_ini(settings_path_, config_);
+    settingsfile.close();
+}
+
 void Agent::update_clients()
 {
-    pt::ptree pt;
-
-    try {
-        pt::read_ini(settings_path_, pt);
-    } catch (pt::ini_parser_error& e) {
-        std::cerr << "ERROR: " << e.what() << "\n\n" << std::endl;
-    }
-
-    pt::ptree& section = pt.get_child(CONFIG_SECTION);
-    pt::ptree& entry = section.get_child(CONFIG_CLIENTS);
-    auto clients = entry.get_value<std::int64_t>();
-    entry.put_value<std::int64_t>(++clients);
-    pt::write_ini(settings_path_, pt);
+    increment_config_value(CONFIG_SECTION, CONFIG_CLIENTS);
 }
 
 void Agent::update_servers()
 {
-    pt::ptree pt;
+    increment_config_value(CONFIG_SECTION, CONFIG_SERVERS);
+}
 
-    try {
-        pt::read_ini(settings_path_, pt);
-    } catch (pt::ini_parser_error& e) {
-        std::cerr << "ERROR: " << e.what() << "\n\n" << std::endl;
+OTZMQZAPReply Agent::zap_handler(const zap::Request& request) const
+{
+    auto output = zap::Reply::Factory(request);
+    const auto& pubkey = request.Credentials().at(0);
+
+    if (zap::Mechanism::Curve != request.Mechanism()) {
+        output->SetCode(zap::Status::AuthFailure);
+        output->SetStatus("Unsupported mechanism");
+    } else if (client_pubkey_ != ot_.Crypto().Encode().Z85Encode(pubkey)) {
+        output->SetCode(zap::Status::AuthFailure);
+        output->SetStatus("Incorrect pubkey");
+    } else {
+        output->SetCode(zap::Status::Success);
+        output->SetStatus("OK");
     }
 
-    pt::ptree& section = pt.get_child(CONFIG_SECTION);
-    pt::ptree& entry = section.get_child(CONFIG_SERVERS);
-    auto servers = entry.get_value<std::int64_t>();
-    entry.put_value<std::int64_t>(++servers);
-    pt::write_ini(settings_path_, pt);
+    return output;
 }
 }  // namespace opentxs::agent

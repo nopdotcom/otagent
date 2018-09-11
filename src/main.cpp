@@ -6,6 +6,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/property_tree/ini_parser.hpp>
+#include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
 #include <csignal>
@@ -27,6 +28,10 @@ extern "C" {
 #define OPTION_SERVERS "servers"
 #define OPTION_SOCKET_PATH "socket-path"
 #define OPTION_ENDPOINT "endpoint"
+#define CONFIG_SERVER_PRIVKEY "server_privkey"
+#define CONFIG_SERVER_PUBKEY "server_pubkey"
+#define CONFIG_CLIENT_PRIVKEY "client_privkey"
+#define CONFIG_CLIENT_PUBKEY "client_pubkey"
 
 namespace po = boost::program_options;
 namespace pt = boost::property_tree;
@@ -95,7 +100,19 @@ po::options_description& config_options()
             "The ipc socket path.")(
             config_option_name(OPTION_ENDPOINT).c_str(),
             po::value<std::string>()->multitoken(),
-            "Tcp endpoint(s).");
+            "Tcp endpoint(s).")(
+            config_option_name(CONFIG_SERVER_PRIVKEY).c_str(),
+            po::value<std::string>(),
+            "Server private key")(
+            config_option_name(CONFIG_SERVER_PUBKEY).c_str(),
+            po::value<std::string>(),
+            "Server public key")(
+            config_option_name(CONFIG_CLIENT_PRIVKEY).c_str(),
+            po::value<std::string>(),
+            "Client private key")(
+            config_option_name(CONFIG_CLIENT_PUBKEY).c_str(),
+            po::value<std::string>(),
+            "Client public key");
     }
 
     return *config_options_;
@@ -217,16 +234,11 @@ std::string find_home()
 int main(int argc, char** argv)
 {
     opentxs::ArgList args;
-
     opentxs::Signals::Block();
-
-    const auto& app =
+    const auto& ot =
         opentxs::OT::Start(args, std::chrono::seconds(OT_STORAGE_GC_SECONDS));
-
     auto settings_path = find_home() + "/.otagent";
-
     read_config_options(settings_path);
-
     read_options(argc, argv);
     auto opts = variables();
 
@@ -236,11 +248,14 @@ int main(int argc, char** argv)
     // Once the socket_path is saved to the config file, don't change the value
     // in the file.
     std::string config_socket_path;
+
     if (!variables()[config_option_name(OPTION_SOCKET_PATH)].empty()) {
         config_socket_path = variables()[config_option_name(OPTION_SOCKET_PATH)]
                                  .as<std::string>();
     }
+
     std::string socket_path = config_socket_path;
+
     // Use the socket_path from the command line, if it exists.
     if (!variables()[OPTION_SOCKET_PATH].empty()) {
         socket_path = variables()[OPTION_SOCKET_PATH].as<std::string>();
@@ -266,6 +281,7 @@ int main(int argc, char** argv)
 
     // Combine the endpoints from the command line and the config file.
     std::vector<std::string> endpoints;
+
     if (!variables()[config_option_name(OPTION_ENDPOINT)].empty()) {
         auto config_endpoints_string =
             variables()[config_option_name(OPTION_ENDPOINT)].as<std::string>();
@@ -277,6 +293,7 @@ int main(int argc, char** argv)
             }
         }
     }
+
     if (!variables()[OPTION_ENDPOINT].empty()) {
         auto command_endoints =
             variables()[OPTION_ENDPOINT].as<std::vector<std::string>>();
@@ -288,6 +305,82 @@ int main(int argc, char** argv)
         }
     }
 
+    std::string server_private_key{};
+    std::string server_public_key{};
+    auto& serverPrivkey =
+        variables()[config_option_name(CONFIG_SERVER_PRIVKEY)];
+    auto& serverPubkey = variables()[config_option_name(CONFIG_SERVER_PUBKEY)];
+    const bool needServerKeys = serverPrivkey.empty() || serverPubkey.empty();
+
+    if (needServerKeys) {
+        std::cout << "Generating new server keypair." << std::endl;
+        auto [generatedSecret, generatedPublic] =
+            opentxs::network::zeromq::CurveClient::RandomKeypair();
+
+        OT_ASSERT(false == generatedSecret.empty());
+        OT_ASSERT(false == generatedPublic.empty());
+
+        server_private_key = generatedSecret;
+        server_public_key = generatedPublic;
+    } else {
+        server_private_key =
+            boost::any_cast<std::string>(serverPrivkey.value());
+        server_public_key = boost::any_cast<std::string>(serverPubkey.value());
+    }
+
+    std::string client_private_key{};
+    std::string client_public_key{};
+    auto& clientPrivkey =
+        variables()[config_option_name(CONFIG_CLIENT_PRIVKEY)];
+    auto& clientPubkey = variables()[config_option_name(CONFIG_CLIENT_PUBKEY)];
+    const bool needClientKeys = clientPrivkey.empty() || clientPubkey.empty();
+
+    if (needClientKeys) {
+        std::cout << "Generating new client keypair." << std::endl;
+        auto [generatedSecret, generatedPublic] =
+            opentxs::network::zeromq::CurveClient::RandomKeypair();
+
+        OT_ASSERT(false == generatedSecret.empty());
+        OT_ASSERT(false == generatedPublic.empty());
+
+        client_private_key = generatedSecret;
+        client_public_key = generatedPublic;
+    } else {
+        client_private_key =
+            boost::any_cast<std::string>(clientPrivkey.value());
+        client_public_key = boost::any_cast<std::string>(clientPubkey.value());
+    }
+
+    {
+        std::stringstream ss{};
+        ss << R"~({)~"
+           << "\n";
+        ss << R"~(  "otagent": {)~"
+           << "\n";
+        ss << R"~(    ")~" << CONFIG_SERVER_PUBKEY;
+        ss << R"~(": ")~";
+        ss << server_public_key;
+        ss << R"~(",)~"
+           << "\n";
+        ss << R"~(    ")~" << CONFIG_CLIENT_PRIVKEY;
+        ss << R"~(": ")~";
+        ss << client_private_key;
+        ss << R"~(",)~"
+           << "\n";
+        ss << R"~(    ")~" << CONFIG_CLIENT_PUBKEY;
+        ss << R"~(": ")~";
+        ss << client_public_key;
+        ss << R"~(")~"
+           << "\n";
+        ss << R"~(  })~"
+           << "\n";
+        ss << R"~(})~"
+           << "\n";
+        std::ofstream settingsfile(find_home() + "/otagent.key");
+        settingsfile << ss.str();
+        settingsfile.close();
+    }
+
     pt::ptree root;
     pt::ptree section;
     section.put(OPTION_CLIENTS, clients);
@@ -297,6 +390,7 @@ int main(int argc, char** argv)
     section.put(
         OPTION_SOCKET_PATH,
         config_socket_path.empty() ? socket_path : config_socket_path);
+
     // Save the endpoints as a single entry in the config file, with the
     // endpoints separated by spaces.
     if (0 < endpoints.size()) {
@@ -306,21 +400,28 @@ int main(int argc, char** argv)
             endpoints_string += ' ' + ep;
         section.put(OPTION_ENDPOINT, endpoints_string);
     }
-    root.push_front(pt::ptree::value_type("otagent", section));
 
+    root.push_front(pt::ptree::value_type("otagent", section));
     fs::fstream settingsfile(settings_path, std::ios::out);
     pt::write_ini(settingsfile, root);
     settingsfile.close();
-
     std::unique_ptr<opentxs::agent::Agent> otagent;
     otagent.reset(new opentxs::agent::Agent(
-        app, clients, servers, socket_path, endpoints, settings_path));
-
+        ot,
+        clients,
+        servers,
+        socket_path,
+        endpoints,
+        server_private_key,
+        server_public_key,
+        client_private_key,
+        client_public_key,
+        settings_path,
+        root));
     std::function<void()> shutdowncallback = [&otagent]() -> void {
         opentxs::otOut << std::endl << "Shutting down..." << std::endl;
         otagent.reset();
     };
-
     opentxs::OT::App().HandleSignals(&shutdowncallback);
     opentxs::OT::Join();
     opentxs::otOut << "Finished." << std::endl;
