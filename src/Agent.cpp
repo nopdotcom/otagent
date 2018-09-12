@@ -64,6 +64,11 @@ Agent::Agent(
     , server_pubkey_(serverPublicKey)
     , client_privkey_(clientPrivateKey)
     , client_pubkey_(clientPublicKey)
+    , task_lock_()
+    , task_connection_map_()
+    , task_callback_(network::zeromq::ListenCallback::Factory(
+          std::bind(&Agent::task_handler, this, std::placeholders::_1)))
+    , task_subscriber_(zmq_.SubscribeSocket(task_callback_))
 {
     {
         Lock lock(config_lock_);
@@ -75,11 +80,13 @@ Agent::Agent(
         save_config(lock);
     }
 
-    for (auto i = 0; i < servers_; ++i) {
+    for (auto i = 0; i < servers_.load(); ++i) {
         ot_.StartServer(ArgList(), i, false);
     }
 
-    for (auto i = 0; i < clients_; ++i) { ot_.StartClient(ArgList(), i); }
+    for (auto i = 0; i < clients_.load(); ++i) {
+        ot_.StartClient(ArgList(), i);
+    }
 
     OT_ASSERT(0 < backend_endpoints_.size());
 
@@ -116,6 +123,27 @@ Agent::Agent(
 
         OT_ASSERT(started);
     }
+
+    OT_ASSERT(0 <= clients_.load());
+
+    for (int i = 0; i < clients_.load(); ++i) {
+        started = task_subscriber_->Start(
+            ot_.Client(i - 1).Endpoints().TaskComplete());
+
+        OT_ASSERT(started);
+    }
+}
+
+void Agent::associate_task(
+    const Data& connection,
+    const std::string& nymID,
+    const std::string& task)
+{
+    LogOutput(OT_METHOD)(__FUNCTION__)(": Connection ")(connection.asHex())(
+        " is waiting for task ")(task)
+        .Flush();
+    Lock lock(task_lock_);
+    task_connection_map_.emplace(task, TaskData{connection, nymID});
 }
 
 std::vector<std::string> Agent::backend_endpoint_generator()
@@ -123,8 +151,9 @@ std::vector<std::string> Agent::backend_endpoint_generator()
     const unsigned int min_threads{1};
     const auto threads =
         std::max(std::thread::hardware_concurrency(), min_threads);
-    otErr << OT_METHOD << __FUNCTION__ << ": Starting " << threads
-          << " handler threads." << std::endl;
+    LogNormal(OT_METHOD)(__FUNCTION__)(": Starting ")(threads)(
+        " handler threads.")
+        .Flush();
     std::vector<std::string> output{};
     const auto prefix = std::string("inproc://opentxs/agent/backend/");
 
@@ -137,13 +166,14 @@ std::vector<std::string> Agent::backend_endpoint_generator()
 
 OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
 {
-    OT_ASSERT(0 < message.Body().size());
+    OT_ASSERT(1 < message.Body().size());
 
-    const auto& frame = message.Body().at(0);
-    const auto data = Data::Factory(frame.data(), frame.size());
+    const auto& request = message.Body().at(0);
+    const auto data = Data::Factory(request.data(), request.size());
     opentxs::proto::RPCCommand command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
     auto response = ot_.RPC(command);
+    const auto connectionID = Data::Factory(message.Body().at(1));
 
     switch (response.type()) {
         case proto::RPCCOMMAND_ADDCLIENTSESSION: {
@@ -189,12 +219,55 @@ OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
         }
     }
 
+    if (proto::RPCRESPONSE_QUEUED == response.success()) {
+        OT_ASSERT(0 == command.session() % 2);
+
+        const auto& taskID = response.task();
+        const auto& nymID = command.nym();
+        associate_task(connectionID, nymID, taskID);
+        // It's possible for the task subscriber to miss a task complete message
+        // if the task finished quickly before we added the id to
+        // task_connection_map_
+        check_task(connectionID, taskID, nymID, command.session() / 2);
+    }
+
     auto replymessage = network::zeromq::Message::ReplyFactory(message);
     const auto replydata =
         opentxs::proto::ProtoAsData<opentxs::proto::RPCResponse>(response);
     replymessage->AddFrame(replydata);
 
     return replymessage;
+}
+
+void Agent::check_task(
+    const Data& connectionID,
+    const std::string& taskID,
+    const std::string& nymID,
+    const int index)
+{
+    const auto status =
+        ot_.Client(index).Sync().Status(Identifier::Factory(taskID));
+    bool result{false};
+
+    switch (status) {
+        case ThreadStatus::FINISHED_SUCCESS: {
+            result = true;
+        } break;
+        case ThreadStatus::FINISHED_FAILED: {
+            result = false;
+        } break;
+        case ThreadStatus::ERROR:
+        case ThreadStatus::RUNNING:
+        case ThreadStatus::SHUTDOWN:
+        default: {
+            return;
+        }
+    }
+
+    Lock lock(task_lock_);
+    task_connection_map_.erase(taskID);
+    lock.unlock();
+    send_task_push(connectionID, taskID, nymID, result);
 }
 
 std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
@@ -212,7 +285,7 @@ std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
 
         OT_ASSERT(started);
 
-        otErr << endpoint << std::endl;
+        LogNormal(endpoint).Flush();
     }
 
     return output;
@@ -220,6 +293,25 @@ std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
 
 void Agent::frontend_handler(network::zeromq::Message& message)
 {
+    const auto size = message.Header().size();
+
+    OT_ASSERT(0 < size);
+
+    if (0 == message.Body().size()) {
+        LogOutput(OT_METHOD)(__FUNCTION__)(": Empty command.").Flush();
+
+        return;
+    }
+
+    // Append connection identity for push notification purposes
+    const auto& identity = message.Header_at(size - 1);
+
+    OT_ASSERT(0 < identity.size());
+
+    LogNormal(OT_METHOD)(__FUNCTION__)(": ConnectionID: ")(
+        Data::Factory(identity)->asHex())
+        .Flush();
+    message.AddFrame(Data::Factory(identity));
     // Forward requests to backend socket(s) via internal socket
     internal_->Send(message);
 }
@@ -236,6 +328,21 @@ void Agent::increment_config_value(
     save_config(lock);
 }
 
+OTZMQMessage Agent::instantiate_push(const Data& connectionID)
+{
+    OT_ASSERT(0 < connectionID.size());
+
+    auto output = network::zeromq::Message::Factory();
+    output->AddFrame(connectionID);
+    output->AddFrame();
+    output->AddFrame("PUSH");
+
+    OT_ASSERT(1 == output->Header().size());
+    OT_ASSERT(1 == output->Body().size());
+
+    return output;
+}
+
 void Agent::internal_handler(network::zeromq::Message& message)
 {
     // Route replies back to original requestor via frontend socket
@@ -249,14 +356,71 @@ void Agent::save_config(const Lock& lock)
     settingsfile.close();
 }
 
+void Agent::send_task_push(
+    const Data& connectionID,
+    const std::string& taskID,
+    const std::string& nymID,
+    const bool result)
+{
+    auto push = instantiate_push(connectionID);
+    proto::RPCPush message{};
+    message.set_version(1);
+    message.set_type(proto::RPCPUSH_TASK);
+    message.set_id(nymID);
+    auto& task = *message.mutable_taskcomplete();
+    task.set_version(1);
+    task.set_id(taskID);
+    task.set_result(result);
+    push->AddFrame(proto::ProtoAsData(message));
+    frontend_->Send(push);
+}
+
+void Agent::task_handler(const network::zeromq::Message& message)
+{
+    if (2 > message.Body().size()) {
+        LogOutput(OT_METHOD)(__FUNCTION__)(": Invalid message").Flush();
+
+        return;
+    }
+
+    LogOutput(OT_METHOD)(__FUNCTION__)(": Received notice for task ")(
+        std::string(message.Body_at(0)))
+        .Flush();
+    const std::string taskID{message.Body_at(0)};
+    const auto raw = Data::Factory(message.Body_at(1));
+    bool success{false};
+    OTPassword::safe_memcpy(
+        &success, sizeof(success), raw->data(), raw->size());
+    Lock lock(task_lock_);
+    const auto it = task_connection_map_.find(taskID);
+
+    if (task_connection_map_.end() == it) {
+        LogOutput(OT_METHOD)(__FUNCTION__)(": We don't care about task ")(
+            std::string(message.Body_at(0)))
+            .Flush();
+
+        return;
+    }
+
+    const OTData connectionID = it->second.first;
+    const std::string nymID = it->second.second;
+    task_connection_map_.erase(it);
+    lock.unlock();
+    send_task_push(connectionID, taskID, nymID, success);
+}
+
 void Agent::update_clients()
 {
     increment_config_value(CONFIG_SECTION, CONFIG_CLIENTS);
+    ++clients_;
+    task_subscriber_->Start(
+        ot_.Client(clients_.load() - 1).Endpoints().TaskComplete());
 }
 
 void Agent::update_servers()
 {
     increment_config_value(CONFIG_SECTION, CONFIG_SERVERS);
+    ++servers_;
 }
 
 OTZMQZAPReply Agent::zap_handler(const zap::Request& request) const
