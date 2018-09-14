@@ -126,7 +126,7 @@ Agent::Agent(
 
     OT_ASSERT(0 <= clients_.load());
 
-    for (int i = 0; i < clients_.load(); ++i) {
+    for (int i = 1; i <= clients_.load(); ++i) {
         started = task_subscriber_->Start(
             ot_.Client(i - 1).Endpoints().TaskComplete());
 
