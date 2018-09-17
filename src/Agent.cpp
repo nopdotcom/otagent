@@ -21,6 +21,7 @@
 #define CONFIG_CLIENT_PUBKEY "client_pubkey"
 
 namespace fs = boost::filesystem;
+namespace zmq = opentxs::network::zeromq;
 
 #define ZAP_DOMAIN "otagent"
 
@@ -43,18 +44,18 @@ Agent::Agent(
     : ot_(app)
     , zmq_(app.ZMQ())
     , clients_(clients)
-    , internal_callback_(network::zeromq::ListenCallback::Factory(
+    , internal_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::internal_handler, this, std::placeholders::_1)))
-    , internal_(zmq_.DealerSocket(internal_callback_, true))
+    , internal_(zmq_.DealerSocket(internal_callback_, zmq::Socket::Direction::Connect))
     , backend_endpoints_(backend_endpoint_generator())
-    , backend_callback_(network::zeromq::ReplyCallback::Factory(
+    , backend_callback_(zmq::ReplyCallback::Factory(
           std::bind(&Agent::backend_handler, this, std::placeholders::_1)))
     , backends_(
           create_backend_sockets(zmq_, backend_endpoints_, backend_callback_))
     , frontend_endpoints_(endpoints)
-    , frontend_callback_(network::zeromq::ListenCallback::Factory(
+    , frontend_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::frontend_handler, this, std::placeholders::_1)))
-    , frontend_(zmq_.RouterSocket(frontend_callback_, false))
+    , frontend_(zmq_.RouterSocket(frontend_callback_, zmq::Socket::Direction::Bind))
     , servers_(servers)
     , settings_path_(settings_path)
     , socket_path_(socket_path)
@@ -66,7 +67,7 @@ Agent::Agent(
     , client_pubkey_(clientPublicKey)
     , task_lock_()
     , task_connection_map_()
-    , task_callback_(network::zeromq::ListenCallback::Factory(
+    , task_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::task_handler, this, std::placeholders::_1)))
     , task_subscriber_(zmq_.SubscribeSocket(task_callback_))
 {
@@ -164,7 +165,7 @@ std::vector<std::string> Agent::backend_endpoint_generator()
     return output;
 }
 
-OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
+OTZMQMessage Agent::backend_handler(const zmq::Message& message)
 {
     OT_ASSERT(1 < message.Body().size());
 
@@ -231,7 +232,7 @@ OTZMQMessage Agent::backend_handler(const network::zeromq::Message& message)
         check_task(connectionID, taskID, nymID, command.session() / 2);
     }
 
-    auto replymessage = network::zeromq::Message::ReplyFactory(message);
+    auto replymessage = zmq::Message::ReplyFactory(message);
     const auto replydata =
         opentxs::proto::ProtoAsData<opentxs::proto::RPCResponse>(response);
     replymessage->AddFrame(replydata);
@@ -271,7 +272,7 @@ void Agent::check_task(
 }
 
 std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
-    const network::zeromq::Context& zmq,
+    const zmq::Context& zmq,
     const std::vector<std::string>& endpoints,
     const OTZMQReplyCallback& callback)
 {
@@ -279,7 +280,7 @@ std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
     std::vector<OTZMQReplySocket> output{};
 
     for (const auto& endpoint : endpoints) {
-        output.emplace_back(zmq.ReplySocket(callback, false));
+        output.emplace_back(zmq.ReplySocket(callback, zmq::Socket::Direction::Bind));
         auto& socket = *output.rbegin();
         started = socket->Start(endpoint);
 
@@ -291,7 +292,7 @@ std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
     return output;
 }
 
-void Agent::frontend_handler(network::zeromq::Message& message)
+void Agent::frontend_handler(zmq::Message& message)
 {
     const auto size = message.Header().size();
 
@@ -332,7 +333,7 @@ OTZMQMessage Agent::instantiate_push(const Data& connectionID)
 {
     OT_ASSERT(0 < connectionID.size());
 
-    auto output = network::zeromq::Message::Factory();
+    auto output = zmq::Message::Factory();
     output->AddFrame(connectionID);
     output->AddFrame();
     output->AddFrame("PUSH");
@@ -343,7 +344,7 @@ OTZMQMessage Agent::instantiate_push(const Data& connectionID)
     return output;
 }
 
-void Agent::internal_handler(network::zeromq::Message& message)
+void Agent::internal_handler(zmq::Message& message)
 {
     // Route replies back to original requestor via frontend socket
     frontend_->Send(message);
@@ -375,7 +376,7 @@ void Agent::send_task_push(
     frontend_->Send(push);
 }
 
-void Agent::task_handler(const network::zeromq::Message& message)
+void Agent::task_handler(const zmq::Message& message)
 {
     if (2 > message.Body().size()) {
         LogOutput(OT_METHOD)(__FUNCTION__)(": Invalid message").Flush();
