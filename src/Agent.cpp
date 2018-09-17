@@ -46,7 +46,9 @@ Agent::Agent(
     , clients_(clients)
     , internal_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::internal_handler, this, std::placeholders::_1)))
-    , internal_(zmq_.DealerSocket(internal_callback_, zmq::Socket::Direction::Connect))
+    , internal_(zmq_.DealerSocket(
+          internal_callback_,
+          zmq::Socket::Direction::Connect))
     , backend_endpoints_(backend_endpoint_generator())
     , backend_callback_(zmq::ReplyCallback::Factory(
           std::bind(&Agent::backend_handler, this, std::placeholders::_1)))
@@ -55,7 +57,8 @@ Agent::Agent(
     , frontend_endpoints_(endpoints)
     , frontend_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::frontend_handler, this, std::placeholders::_1)))
-    , frontend_(zmq_.RouterSocket(frontend_callback_, zmq::Socket::Direction::Bind))
+    , frontend_(
+          zmq_.RouterSocket(frontend_callback_, zmq::Socket::Direction::Bind))
     , servers_(servers)
     , settings_path_(settings_path)
     , socket_path_(socket_path)
@@ -171,7 +174,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
 
     const auto& request = message.Body().at(0);
     const auto data = Data::Factory(request.data(), request.size());
-    opentxs::proto::RPCCommand command =
+    const auto command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
     auto response = ot_.RPC(command);
     const auto connectionID = Data::Factory(message.Body().at(1));
@@ -183,8 +186,8 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_ADDSERVERSESSION: {
             update_servers();
         } break;
-        case proto::RPCCOMMAND_LISTCLIENTSSESSIONS:
-        case proto::RPCCOMMAND_LISTSERVERSSESSIONS:
+        case proto::RPCCOMMAND_LISTCLIENTSESSIONS:
+        case proto::RPCCOMMAND_LISTSERVERSESSIONS:
         case proto::RPCCOMMAND_IMPORTHDSEED:
         case proto::RPCCOMMAND_LISTHDSEEDS:
         case proto::RPCCOMMAND_GETHDSEED:
@@ -214,6 +217,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_ACCEPTVERIFICATION:
         case proto::RPCCOMMAND_SENDCONTACTMESSAGE:
         case proto::RPCCOMMAND_GETCONTACTACTIVITY:
+        case proto::RPCCOMMAND_GETSERVERCONTRACT:
         case proto::RPCCOMMAND_ERROR:
         default: {
             break;
@@ -280,7 +284,8 @@ std::vector<OTZMQReplySocket> Agent::create_backend_sockets(
     std::vector<OTZMQReplySocket> output{};
 
     for (const auto& endpoint : endpoints) {
-        output.emplace_back(zmq.ReplySocket(callback, zmq::Socket::Direction::Bind));
+        output.emplace_back(
+            zmq.ReplySocket(callback, zmq::Socket::Direction::Bind));
         auto& socket = *output.rbegin();
         started = socket->Start(endpoint);
 
