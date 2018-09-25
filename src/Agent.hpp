@@ -76,7 +76,7 @@ private:
         const std::vector<std::string>& endpoints,
         const OTZMQReplyCallback& callback);
 
-    OTZMQMessage instantiate_push(const Data& connectionID);
+    void schedule_refresh(const int instance) const;
     OTZMQZAPReply zap_handler(const zap::Request& request) const;
 
     void associate_nym(const Data& connection, const std::string& nymID);
@@ -94,6 +94,7 @@ private:
     void increment_config_value(
         const std::string& section,
         const std::string& entry);
+    OTZMQMessage instantiate_push(const Data& connectionID);
     void frontend_handler(network::zeromq::Message& message);
     void save_config(const Lock& lock);
     void send_task_push(

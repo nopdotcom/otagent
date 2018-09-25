@@ -137,6 +137,8 @@ Agent::Agent(
             ot_.Client(i - 1).Endpoints().TaskComplete());
 
         OT_ASSERT(started);
+
+        schedule_refresh(i - 1);
     }
 }
 
@@ -384,6 +386,14 @@ void Agent::save_config(const Lock& lock)
     settingsfile.close();
 }
 
+void Agent::schedule_refresh(const int instance) const
+{
+    ot_.Client(instance).Schedule(
+        std::chrono::seconds(30),
+        [=]() -> void { this->ot_.Client(instance).Sync().Refresh(); },
+        (std::chrono::seconds(std::time(nullptr))));
+}
+
 void Agent::send_task_push(
     const Data& connectionID,
     const std::string& taskID,
@@ -423,7 +433,7 @@ void Agent::task_handler(const zmq::Message& message)
     const auto it = task_connection_map_.find(taskID);
 
     if (task_connection_map_.end() == it) {
-        LogOutput(OT_METHOD)(__FUNCTION__)(": We don't care about task ")(
+        LogDebug(OT_METHOD)(__FUNCTION__)(": We don't care about task ")(
             std::string(message.Body_at(0)))
             .Flush();
 
@@ -443,6 +453,7 @@ void Agent::update_clients()
     ++clients_;
     task_subscriber_->Start(
         ot_.Client(clients_.load() - 1).Endpoints().TaskComplete());
+    schedule_refresh(clients_.load() - 1);
 }
 
 void Agent::update_servers()
