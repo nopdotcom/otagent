@@ -70,6 +70,8 @@ Agent::Agent(
     , client_pubkey_(clientPublicKey)
     , task_lock_()
     , task_connection_map_()
+    , nym_lock_()
+    , nym_connection_map_()
     , task_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::task_handler, this, std::placeholders::_1)))
     , task_subscriber_(zmq_.SubscribeSocket(task_callback_))
@@ -138,6 +140,22 @@ Agent::Agent(
     }
 }
 
+void Agent::associate_nym(const Data& connection, const std::string& nymID)
+{
+    if (nymID.empty()) { return; }
+
+    auto it = nym_connection_map_.find(nymID);
+
+    if (nym_connection_map_.end() == it) {
+        Lock lock(task_lock_);
+        nym_connection_map_.emplace(nymID, connection);
+        lock.unlock();
+        LogOutput(OT_METHOD)(__FUNCTION__)(": Connection ")(connection.asHex())(
+            " is associated with nym ")(nymID)
+            .Flush();
+    }
+}
+
 void Agent::associate_task(
     const Data& connection,
     const std::string& nymID,
@@ -176,8 +194,9 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
     const auto data = Data::Factory(request.data(), request.size());
     const auto command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
-    auto response = ot_.RPC(command);
     const auto connectionID = Data::Factory(message.Body().at(1));
+    associate_nym(connectionID, command.nym());
+    auto response = ot_.RPC(command);
 
     switch (response.type()) {
         case proto::RPCCOMMAND_ADDCLIENTSESSION: {
@@ -191,7 +210,11 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_IMPORTHDSEED:
         case proto::RPCCOMMAND_LISTHDSEEDS:
         case proto::RPCCOMMAND_GETHDSEED:
-        case proto::RPCCOMMAND_CREATENYM:
+        case proto::RPCCOMMAND_CREATENYM: {
+            for (const auto& nymid : response.identifier()) {
+                associate_nym(connectionID, nymid);
+            }
+        } break;
         case proto::RPCCOMMAND_LISTNYMS:
         case proto::RPCCOMMAND_GETNYM:
         case proto::RPCCOMMAND_ADDCLAIM:
@@ -220,7 +243,6 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETSERVERCONTRACT:
         case proto::RPCCOMMAND_ERROR:
         default: {
-            break;
         }
     }
 

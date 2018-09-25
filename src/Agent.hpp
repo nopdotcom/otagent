@@ -40,6 +40,8 @@ private:
     using TaskData = std::pair<OTData, std::string>;
     // task id, task data
     using TaskMap = std::map<std::string, TaskData>;
+    // nym id, connection id
+    using NymMap = std::map<std::string, OTData>;
 
     const api::Native& ot_;
     const network::zeromq::Context& zmq_;
@@ -63,6 +65,8 @@ private:
     const std::string client_pubkey_;
     mutable std::mutex task_lock_;
     TaskMap task_connection_map_;
+    mutable std::mutex nym_lock_;
+    NymMap nym_connection_map_;
     const OTZMQListenCallback task_callback_;
     const OTZMQSubscribeSocket task_subscriber_;
 
@@ -75,6 +79,7 @@ private:
     OTZMQMessage instantiate_push(const Data& connectionID);
     OTZMQZAPReply zap_handler(const zap::Request& request) const;
 
+    void associate_nym(const Data& connection, const std::string& nymID);
     void associate_task(
         const Data& connection,
         const std::string& nymID,
