@@ -323,9 +323,10 @@ int main(int argc, char** argv)
         server_private_key = generatedSecret;
         server_public_key = generatedPublic;
     } else {
-        server_private_key =
-            boost::any_cast<std::string>(serverPrivkey.value());
-        server_public_key = boost::any_cast<std::string>(serverPubkey.value());
+        server_private_key = ot.Crypto().Encode().DataDecode(
+            boost::any_cast<std::string>(serverPrivkey.value()));
+        server_public_key = ot.Crypto().Encode().DataDecode(
+            boost::any_cast<std::string>(serverPubkey.value()));
     }
 
     std::string client_private_key{};
@@ -346,9 +347,10 @@ int main(int argc, char** argv)
         client_private_key = generatedSecret;
         client_public_key = generatedPublic;
     } else {
-        client_private_key =
-            boost::any_cast<std::string>(clientPrivkey.value());
-        client_public_key = boost::any_cast<std::string>(clientPubkey.value());
+        client_private_key = ot.Crypto().Encode().DataDecode(
+            boost::any_cast<std::string>(clientPrivkey.value()));
+        client_public_key = ot.Crypto().Encode().DataDecode(
+            boost::any_cast<std::string>(clientPubkey.value()));
     }
 
     {

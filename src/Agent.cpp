@@ -79,10 +79,18 @@ Agent::Agent(
     {
         Lock lock(config_lock_);
         auto& section = config.get_child(CONFIG_SECTION);
-        section.put(CONFIG_SERVER_PRIVKEY, server_privkey_);
-        section.put(CONFIG_SERVER_PUBKEY, server_pubkey_);
-        section.put(CONFIG_CLIENT_PRIVKEY, client_privkey_);
-        section.put(CONFIG_CLIENT_PUBKEY, client_pubkey_);
+        section.put(
+            CONFIG_SERVER_PRIVKEY,
+            ot_.Crypto().Encode().DataEncode(server_privkey_));
+        section.put(
+            CONFIG_SERVER_PUBKEY,
+            ot_.Crypto().Encode().DataEncode(server_pubkey_));
+        section.put(
+            CONFIG_CLIENT_PRIVKEY,
+            ot_.Crypto().Encode().DataEncode(client_privkey_));
+        section.put(
+            CONFIG_CLIENT_PUBKEY,
+            ot_.Crypto().Encode().DataEncode(client_pubkey_));
         save_config(lock);
     }
 
