@@ -21,7 +21,6 @@
 #define CONFIG_CLIENT_PUBKEY "client_pubkey"
 
 namespace fs = boost::filesystem;
-namespace zmq = opentxs::network::zeromq;
 
 #define ZAP_DOMAIN "otagent"
 
@@ -72,8 +71,11 @@ Agent::Agent(
     , task_connection_map_()
     , nym_lock_()
     , nym_connection_map_()
+    , push_callback_(zmq::ListenCallback::Factory(
+          std::bind(&Agent::push_handler, this, std::placeholders::_1)))
     , task_callback_(zmq::ListenCallback::Factory(
           std::bind(&Agent::task_handler, this, std::placeholders::_1)))
+    , push_subscriber_(zmq_.SubscribeSocket(push_callback_))
     , task_subscriber_(zmq_.SubscribeSocket(task_callback_))
 {
     {
@@ -148,6 +150,11 @@ Agent::Agent(
 
         schedule_refresh(i - 1);
     }
+
+    started =
+        push_subscriber_->Start(ot_.ZMQ().BuildEndpoint("rpc/push", -1, 1));
+
+    OT_ASSERT(started);
 }
 
 void Agent::associate_nym(const Data& connection, const std::string& nymID)
@@ -406,6 +413,44 @@ void Agent::internal_handler(zmq::Message& message)
     frontend_->Send(message);
 }
 
+void Agent::push_handler(const zmq::Message& message)
+{
+    if (2 != message.Body().size()) {
+        LogOutput(OT_METHOD)(__FUNCTION__)(": Invalid message").Flush();
+
+        return;
+    }
+
+    const std::string nymID{message.Body_at(0)};
+    const auto& payload = message.Body_at(1);
+    auto connection = Data::Factory();
+
+    try {
+        Lock lock(nym_lock_);
+        connection = nym_connection_map_.at(nymID);
+    } catch (...) {
+        LogNormal(OT_METHOD)(__FUNCTION__)(": No connection associated with ")(
+            nymID)
+            .Flush();
+
+        return;
+    }
+
+    auto notification = instantiate_push(connection);
+    notification->AddFrame(payload);
+    const auto sent = frontend_->Send(notification);
+
+    if (sent) {
+        LogNormal(OT_METHOD)(__FUNCTION__)(": Push notification delivered to ")(
+            nymID)(" via ")(connection->asHex())
+            .Flush();
+    } else {
+        LogOutput(OT_METHOD)(__FUNCTION__)(
+            ": Push notification delivery failed")
+            .Flush();
+    }
+}
+
 void Agent::save_config(const Lock& lock)
 {
     fs::fstream settingsfile(settings_path_, std::ios::out);
@@ -415,7 +460,9 @@ void Agent::save_config(const Lock& lock)
 
 void Agent::schedule_refresh(const int instance) const
 {
-    ot_.Client(instance).Schedule(
+    const auto& client = ot_.Client(instance);
+    client.Sync().Refresh();
+    client.Schedule(
         std::chrono::seconds(30),
         [=]() -> void { this->ot_.Client(instance).Sync().Refresh(); },
         (std::chrono::seconds(std::time(nullptr))));

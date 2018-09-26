@@ -13,7 +13,8 @@
 #include <string>
 
 namespace pt = boost::property_tree;
-namespace zap = opentxs::network::zeromq::zap;
+namespace zmq = opentxs::network::zeromq;
+namespace zap = zmq::zap;
 
 namespace opentxs::agent
 {
@@ -44,7 +45,7 @@ private:
     using NymMap = std::map<std::string, OTData>;
 
     const api::Native& ot_;
-    const network::zeromq::Context& zmq_;
+    const zmq::Context& zmq_;
     std::atomic<std::int64_t> clients_;
     const OTZMQListenCallback internal_callback_;
     const OTZMQDealerSocket internal_;
@@ -67,12 +68,14 @@ private:
     TaskMap task_connection_map_;
     mutable std::mutex nym_lock_;
     NymMap nym_connection_map_;
+    const OTZMQListenCallback push_callback_;
     const OTZMQListenCallback task_callback_;
+    const OTZMQSubscribeSocket push_subscriber_;
     const OTZMQSubscribeSocket task_subscriber_;
 
     static std::vector<std::string> backend_endpoint_generator();
     static std::vector<OTZMQReplySocket> create_backend_sockets(
-        const network::zeromq::Context& zmq,
+        const zmq::Context& zmq,
         const std::vector<std::string>& endpoints,
         const OTZMQReplyCallback& callback);
 
@@ -84,25 +87,26 @@ private:
         const Data& connection,
         const std::string& nymID,
         const std::string& task);
-    OTZMQMessage backend_handler(const network::zeromq::Message& message);
+    OTZMQMessage backend_handler(const zmq::Message& message);
     void check_task(
         const Data& connectionID,
         const std::string& taskID,
         const std::string& nymID,
         const int clientIndex);
-    void internal_handler(network::zeromq::Message& message);
+    void internal_handler(zmq::Message& message);
     void increment_config_value(
         const std::string& section,
         const std::string& entry);
     OTZMQMessage instantiate_push(const Data& connectionID);
-    void frontend_handler(network::zeromq::Message& message);
+    void frontend_handler(zmq::Message& message);
+    void push_handler(const zmq::Message& message);
     void save_config(const Lock& lock);
     void send_task_push(
         const Data& connectionID,
         const std::string& taskID,
         const std::string& nymID,
         const bool result);
-    void task_handler(const network::zeromq::Message& message);
+    void task_handler(const zmq::Message& message);
     void update_clients();
     void update_servers();
 
