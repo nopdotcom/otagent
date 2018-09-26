@@ -171,6 +171,10 @@ void Agent::associate_task(
     const std::string& nymID,
     const std::string& task)
 {
+    OT_ASSERT(false == connection.empty());
+    OT_ASSERT(false == nymID.empty());
+    OT_ASSERT(false == task.empty());
+
     LogOutput(OT_METHOD)(__FUNCTION__)(": Connection ")(connection.asHex())(
         " is waiting for task ")(task)
         .Flush();
@@ -207,6 +211,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
     const auto connectionID = Data::Factory(message.Body().at(1));
     associate_nym(connectionID, command.nym());
     auto response = ot_.RPC(command);
+    std::string taskNymID{};
 
     switch (response.type()) {
         case proto::RPCCOMMAND_ADDCLIENTSESSION: {
@@ -231,15 +236,30 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_DELETECLAIM:
         case proto::RPCCOMMAND_IMPORTSERVERCONTRACT:
         case proto::RPCCOMMAND_LISTSERVERCONTRACTS:
-        case proto::RPCCOMMAND_REGISTERNYM:
+        case proto::RPCCOMMAND_REGISTERNYM: {
+            taskNymID = command.owner();
+        } break;
         case proto::RPCCOMMAND_CREATEUNITDEFINITION:
         case proto::RPCCOMMAND_LISTUNITDEFINITIONS:
-        case proto::RPCCOMMAND_ISSUEUNITDEFINITION:
-        case proto::RPCCOMMAND_CREATEACCOUNT:
+        case proto::RPCCOMMAND_ISSUEUNITDEFINITION: {
+            taskNymID = command.owner();
+        } break;
+        case proto::RPCCOMMAND_CREATEACCOUNT: {
+            taskNymID = command.owner();
+        } break;
         case proto::RPCCOMMAND_LISTACCOUNTS:
         case proto::RPCCOMMAND_GETACCOUNTBALANCE:
         case proto::RPCCOMMAND_GETACCOUNTACTIVITY:
-        case proto::RPCCOMMAND_SENDPAYMENT:
+        case proto::RPCCOMMAND_SENDPAYMENT: {
+            if (proto::RPCRESPONSE_QUEUED == response.success()) {
+                const auto accountID =
+                    Identifier::Factory(command.sendpayment().sourceaccount());
+                taskNymID = ot_.Client(command.session())
+                                .Storage()
+                                .AccountOwner(accountID)
+                                ->str();
+            }
+        } break;
         case proto::RPCCOMMAND_MOVEFUNDS:
         case proto::RPCCOMMAND_ADDCONTACT:
         case proto::RPCCOMMAND_LISTCONTACTS:
@@ -260,12 +280,11 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         OT_ASSERT(0 == command.session() % 2);
 
         const auto& taskID = response.task();
-        const auto& nymID = command.nym();
-        associate_task(connectionID, nymID, taskID);
+        associate_task(connectionID, taskNymID, taskID);
         // It's possible for the task subscriber to miss a task complete message
         // if the task finished quickly before we added the id to
         // task_connection_map_
-        check_task(connectionID, taskID, nymID, command.session() / 2);
+        check_task(connectionID, taskID, taskNymID, command.session() / 2);
     }
 
     auto replymessage = zmq::Message::ReplyFactory(message);
@@ -408,6 +427,10 @@ void Agent::send_task_push(
     const std::string& nymID,
     const bool result)
 {
+    OT_ASSERT(false == connectionID.empty());
+    OT_ASSERT(false == taskID.empty());
+    OT_ASSERT(false == nymID.empty());
+
     auto push = instantiate_push(connectionID);
     proto::RPCPush message{};
     message.set_version(1);
@@ -417,6 +440,9 @@ void Agent::send_task_push(
     task.set_version(1);
     task.set_id(taskID);
     task.set_result(result);
+
+    OT_ASSERT(proto::Validate(message, VERBOSE));
+
     push->AddFrame(proto::ProtoAsData(message));
     frontend_->Send(push);
 }
@@ -452,6 +478,9 @@ void Agent::task_handler(const zmq::Message& message)
     const std::string nymID = it->second.second;
     task_connection_map_.erase(it);
     lock.unlock();
+
+    OT_ASSERT(false == nymID.empty());
+
     send_task_push(connectionID, taskID, nymID, success);
 }
 
