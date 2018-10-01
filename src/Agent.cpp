@@ -227,38 +227,19 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_ADDSERVERSESSION: {
             update_servers();
         } break;
-        case proto::RPCCOMMAND_LISTCLIENTSESSIONS:
-        case proto::RPCCOMMAND_LISTSERVERSESSIONS:
-        case proto::RPCCOMMAND_IMPORTHDSEED:
-        case proto::RPCCOMMAND_LISTHDSEEDS:
-        case proto::RPCCOMMAND_GETHDSEED:
         case proto::RPCCOMMAND_CREATENYM: {
             for (const auto& nymid : response.identifier()) {
                 associate_nym(connectionID, nymid);
             }
         } break;
-        case proto::RPCCOMMAND_LISTNYMS:
-        case proto::RPCCOMMAND_GETNYM:
-        case proto::RPCCOMMAND_ADDCLAIM:
-        case proto::RPCCOMMAND_DELETECLAIM:
-        case proto::RPCCOMMAND_IMPORTSERVERCONTRACT:
-        case proto::RPCCOMMAND_LISTSERVERCONTRACTS:
-        case proto::RPCCOMMAND_REGISTERNYM: {
-            taskNymID = command.owner();
-        } break;
-        case proto::RPCCOMMAND_CREATEUNITDEFINITION:
-        case proto::RPCCOMMAND_LISTUNITDEFINITIONS:
-        case proto::RPCCOMMAND_ISSUEUNITDEFINITION: {
-            taskNymID = command.owner();
-        } break;
+        case proto::RPCCOMMAND_REGISTERNYM:
+        case proto::RPCCOMMAND_ISSUEUNITDEFINITION:
         case proto::RPCCOMMAND_CREATEACCOUNT: {
             taskNymID = command.owner();
         } break;
-        case proto::RPCCOMMAND_LISTACCOUNTS:
-        case proto::RPCCOMMAND_GETACCOUNTBALANCE:
-        case proto::RPCCOMMAND_GETACCOUNTACTIVITY:
         case proto::RPCCOMMAND_SENDPAYMENT: {
-            if (proto::RPCRESPONSE_QUEUED == response.success()) {
+            if (0 < response.status_size() &&
+                proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
                 const auto accountID =
                     Identifier::Factory(command.sendpayment().sourceaccount());
                 taskNymID = ot_.Client(command.session())
@@ -267,6 +248,33 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
                                 ->str();
             }
         } break;
+        case proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS: {
+            if (0 < response.status_size() &&
+                proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
+                const auto accountID = Identifier::Factory(
+                    command.acceptpendingpayment(0).destinationaccount());
+                taskNymID = ot_.Client(command.session())
+                                .Storage()
+                                .AccountOwner(accountID)
+                                ->str();
+            }
+        } break;
+        case proto::RPCCOMMAND_LISTCLIENTSESSIONS:
+        case proto::RPCCOMMAND_LISTSERVERSESSIONS:
+        case proto::RPCCOMMAND_IMPORTHDSEED:
+        case proto::RPCCOMMAND_LISTHDSEEDS:
+        case proto::RPCCOMMAND_GETHDSEED:
+        case proto::RPCCOMMAND_LISTNYMS:
+        case proto::RPCCOMMAND_GETNYM:
+        case proto::RPCCOMMAND_ADDCLAIM:
+        case proto::RPCCOMMAND_DELETECLAIM:
+        case proto::RPCCOMMAND_IMPORTSERVERCONTRACT:
+        case proto::RPCCOMMAND_LISTSERVERCONTRACTS:
+        case proto::RPCCOMMAND_CREATEUNITDEFINITION:
+        case proto::RPCCOMMAND_LISTUNITDEFINITIONS:
+        case proto::RPCCOMMAND_LISTACCOUNTS:
+        case proto::RPCCOMMAND_GETACCOUNTBALANCE:
+        case proto::RPCCOMMAND_GETACCOUNTACTIVITY:
         case proto::RPCCOMMAND_MOVEFUNDS:
         case proto::RPCCOMMAND_ADDCONTACT:
         case proto::RPCCOMMAND_LISTCONTACTS:
@@ -278,20 +286,24 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_SENDCONTACTMESSAGE:
         case proto::RPCCOMMAND_GETCONTACTACTIVITY:
         case proto::RPCCOMMAND_GETSERVERCONTRACT:
+        case proto::RPCCOMMAND_GETPENDINGPAYMENTS:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
     }
 
-    if (proto::RPCRESPONSE_QUEUED == response.success()) {
+    if (0 < response.status_size() &&
+        proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
         OT_ASSERT(0 == command.session() % 2);
 
-        const auto& taskID = response.task();
-        associate_task(connectionID, taskNymID, taskID);
-        // It's possible for the task subscriber to miss a task complete message
-        // if the task finished quickly before we added the id to
-        // task_connection_map_
-        check_task(connectionID, taskID, taskNymID, command.session() / 2);
+        if (0 < response.task_size()) {
+            const auto& taskID = response.task(0).id();
+            associate_task(connectionID, taskNymID, taskID);
+            // It's possible for the task subscriber to miss a task
+            // complete message if the task finished quickly before
+            // we added the id to task_connection_map_
+            check_task(connectionID, taskID, taskNymID, command.session() / 2);
+        }
     }
 
     auto replymessage = zmq::Message::ReplyFactory(message);
@@ -509,7 +521,10 @@ void Agent::task_handler(const zmq::Message& message)
     const auto raw = Data::Factory(message.Body_at(1));
     bool success{false};
     OTPassword::safe_memcpy(
-        &success, sizeof(success), raw->data(), raw->size());
+        &success,
+        sizeof(success),
+        raw->data(),
+        static_cast<std::uint32_t>(raw->size()));
     Lock lock(task_lock_);
     const auto it = task_connection_map_.find(taskID);
 
@@ -535,9 +550,10 @@ void Agent::update_clients()
 {
     increment_config_value(CONFIG_SECTION, CONFIG_CLIENTS);
     ++clients_;
-    task_subscriber_->Start(
-        ot_.Client(clients_.load() - 1).Endpoints().TaskComplete());
-    schedule_refresh(clients_.load() - 1);
+    task_subscriber_->Start(ot_.Client(static_cast<int>(clients_.load()) - 1)
+                                .Endpoints()
+                                .TaskComplete());
+    schedule_refresh(static_cast<int>(clients_.load()) - 1);
 }
 
 void Agent::update_servers()
