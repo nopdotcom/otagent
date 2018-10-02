@@ -234,7 +234,8 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         } break;
         case proto::RPCCOMMAND_REGISTERNYM:
         case proto::RPCCOMMAND_ISSUEUNITDEFINITION:
-        case proto::RPCCOMMAND_CREATEACCOUNT: {
+        case proto::RPCCOMMAND_CREATEACCOUNT:
+        case proto::RPCCOMMAND_CREATECOMPATIBLEACCOUNT: {
             taskNymID = command.owner();
         } break;
         case proto::RPCCOMMAND_SENDPAYMENT: {
@@ -287,6 +288,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETCONTACTACTIVITY:
         case proto::RPCCOMMAND_GETSERVERCONTRACT:
         case proto::RPCCOMMAND_GETPENDINGPAYMENTS:
+        case proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
