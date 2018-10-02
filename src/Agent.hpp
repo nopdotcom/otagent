@@ -78,6 +78,7 @@ private:
         const zmq::Context& zmq,
         const std::vector<std::string>& endpoints,
         const OTZMQReplyCallback& callback);
+    static int session_to_client_index(const std::uint32_t session);
 
     void schedule_refresh(const int instance) const;
     OTZMQZAPReply zap_handler(const zap::Request& request) const;

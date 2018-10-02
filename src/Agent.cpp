@@ -243,10 +243,11 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
                 proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
                 const auto accountID =
                     Identifier::Factory(command.sendpayment().sourceaccount());
-                taskNymID = ot_.Client(command.session())
-                                .Storage()
-                                .AccountOwner(accountID)
-                                ->str();
+                taskNymID =
+                    ot_.Client(session_to_client_index(command.session()))
+                        .Storage()
+                        .AccountOwner(accountID)
+                        ->str();
             }
         } break;
         case proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS: {
@@ -254,10 +255,11 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
                 proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
                 const auto accountID = Identifier::Factory(
                     command.acceptpendingpayment(0).destinationaccount());
-                taskNymID = ot_.Client(command.session())
-                                .Storage()
-                                .AccountOwner(accountID)
-                                ->str();
+                taskNymID =
+                    ot_.Client(session_to_client_index(command.session()))
+                        .Storage()
+                        .AccountOwner(accountID)
+                        ->str();
             }
         } break;
         case proto::RPCCOMMAND_LISTCLIENTSESSIONS:
@@ -296,7 +298,6 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
 
     if (0 < response.status_size() &&
         proto::RPCRESPONSE_QUEUED == response.status(0).code()) {
-        OT_ASSERT(0 == command.session() % 2);
 
         if (0 < response.task_size()) {
             const auto& taskID = response.task(0).id();
@@ -304,7 +305,11 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
             // It's possible for the task subscriber to miss a task
             // complete message if the task finished quickly before
             // we added the id to task_connection_map_
-            check_task(connectionID, taskID, taskNymID, command.session() / 2);
+            check_task(
+                connectionID,
+                taskID,
+                taskNymID,
+                session_to_client_index(command.session()));
         }
     }
 
@@ -508,6 +513,14 @@ void Agent::send_task_push(
     frontend_->Send(push);
 }
 
+int Agent::session_to_client_index(const std::uint32_t session)
+{
+    OT_ASSERT(0 <= session);
+    OT_ASSERT(0 == session % 2);
+
+    return session / 2;
+}
+
 void Agent::task_handler(const zmq::Message& message)
 {
     if (2 > message.Body().size()) {
@@ -551,11 +564,10 @@ void Agent::task_handler(const zmq::Message& message)
 void Agent::update_clients()
 {
     increment_config_value(CONFIG_SECTION, CONFIG_CLIENTS);
-    ++clients_;
-    task_subscriber_->Start(ot_.Client(static_cast<int>(clients_.load()) - 1)
-                                .Endpoints()
-                                .TaskComplete());
-    schedule_refresh(static_cast<int>(clients_.load()) - 1);
+    const auto newCount = ++clients_;
+    const auto newIndex = static_cast<int>(newCount) - 1;
+    task_subscriber_->Start(ot_.Client(newIndex).Endpoints().TaskComplete());
+    schedule_refresh(newIndex);
 }
 
 void Agent::update_servers()
