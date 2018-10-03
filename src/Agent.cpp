@@ -391,7 +391,7 @@ void Agent::frontend_handler(zmq::Message& message)
 
     OT_ASSERT(0 < identity.size());
 
-    LogNormal(OT_METHOD)(__FUNCTION__)(": ConnectionID: ")(
+    LogVerbose(OT_METHOD)(__FUNCTION__)(": ConnectionID: ")(
         Data::Factory(identity)->asHex())
         .Flush();
     message.AddFrame(Data::Factory(identity));
@@ -515,7 +515,6 @@ void Agent::send_task_push(
 
 int Agent::session_to_client_index(const std::uint32_t session)
 {
-    OT_ASSERT(0 <= session);
     OT_ASSERT(0 == session % 2);
 
     return session / 2;
