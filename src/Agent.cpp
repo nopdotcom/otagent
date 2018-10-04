@@ -216,7 +216,9 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
     const auto command =
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
     const auto connectionID = Data::Factory(message.Body().at(1));
-    associate_nym(connectionID, command.nym());
+    for (auto nym : command.associatenym()) {
+    	associate_nym(connectionID, nym);
+    }
     auto response = ot_.RPC(command);
     std::string taskNymID{};
 
