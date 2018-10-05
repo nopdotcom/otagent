@@ -1,0 +1,14 @@
+[Unit]
+Description=Open Transactions Agent daemon
+After=network.target
+
+[Service]
+EnvironmentFile=%h/otagent.endpoint
+User=%i
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/otagent --endpoint=${OTAGENT_ENDPOINT}
+WorkingDirectory=%h
+
+[Install]
+WantedBy=multi-user.target
