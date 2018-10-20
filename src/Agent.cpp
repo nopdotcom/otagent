@@ -217,7 +217,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         opentxs::proto::DataToProto<opentxs::proto::RPCCommand>(data);
     const auto connectionID = Data::Factory(message.Body().at(1));
     for (auto nym : command.associatenym()) {
-    	associate_nym(connectionID, nym);
+        associate_nym(connectionID, nym);
     }
     auto response = ot_.RPC(command);
     std::string taskNymID{};
@@ -293,6 +293,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETSERVERCONTRACT:
         case proto::RPCCOMMAND_GETPENDINGPAYMENTS:
         case proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS:
+        case proto::RPCCOMMAND_GETWORKFLOW:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
