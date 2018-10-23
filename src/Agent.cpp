@@ -224,10 +224,16 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
 
     switch (response.type()) {
         case proto::RPCCOMMAND_ADDCLIENTSESSION: {
-            update_clients();
+            if (0 < response.status_size() &&
+                proto::RPCRESPONSE_SUCCESS == response.status(0).code()) {
+                update_clients();
+            }
         } break;
         case proto::RPCCOMMAND_ADDSERVERSESSION: {
-            update_servers();
+            if (0 < response.status_size() &&
+                proto::RPCRESPONSE_SUCCESS == response.status(0).code()) {
+                update_servers();
+            }
         } break;
         case proto::RPCCOMMAND_CREATENYM: {
             for (const auto& nymid : response.identifier()) {
