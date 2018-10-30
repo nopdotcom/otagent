@@ -28,6 +28,7 @@ extern "C" {
 #define OPTION_SERVERS "servers"
 #define OPTION_SOCKET_PATH "socket-path"
 #define OPTION_ENDPOINT "endpoint"
+#define OPTION_LOG_ENDPOINT "logendpoint"
 #define CONFIG_SERVER_PRIVKEY "server_privkey"
 #define CONFIG_SERVER_PUBKEY "server_pubkey"
 #define CONFIG_CLIENT_PRIVKEY "client_privkey"
@@ -76,7 +77,8 @@ po::options_description& options()
             "The ipc socket path.")(
             OPTION_ENDPOINT,
             po::value<std::vector<std::string>>()->multitoken(),
-            "Tcp endpoint(s).");
+            "Tcp endpoint(s).")(
+            OPTION_LOG_ENDPOINT, po::value<std::string>(), "Log endpoint.");
     }
 
     return *options_;
@@ -233,14 +235,20 @@ std::string find_home()
 
 int main(int argc, char** argv)
 {
-    opentxs::ArgList args;
     opentxs::Signals::Block();
-    const auto& ot =
-        opentxs::OT::Start(args, std::chrono::seconds(OT_STORAGE_GC_SECONDS));
     auto settings_path = find_home() + "/.otagent";
     read_config_options(settings_path);
     read_options(argc, argv);
     auto opts = variables();
+
+    opentxs::ArgList args;
+    if (!variables()[OPTION_LOG_ENDPOINT].empty()) {
+        args[OPTION_LOG_ENDPOINT].emplace(
+            variables()[OPTION_LOG_ENDPOINT].as<std::string>());
+    }
+
+    const auto& ot =
+        opentxs::OT::Start(args, std::chrono::seconds(OT_STORAGE_GC_SECONDS));
 
     // Use the max of the values from the command line and the config file.
     std::int64_t clients = max_option_value(OPTION_CLIENTS);
