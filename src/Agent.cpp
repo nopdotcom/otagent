@@ -304,6 +304,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETWORKFLOW:
         case proto::RPCCOMMAND_GETSERVERPASSWORD:
         case proto::RPCCOMMAND_GETADMINNYM:
+        case proto::RPCCOMMAND_GETUNITDEFINITION:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
