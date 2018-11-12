@@ -19,6 +19,8 @@
 #define CONFIG_SERVER_PUBKEY "server_pubkey"
 #define CONFIG_CLIENT_PRIVKEY "client_privkey"
 #define CONFIG_CLIENT_PUBKEY "client_pubkey"
+#define RPCPUSH_VERSION 2
+#define TASKCOMPLETE_VERSION 1
 
 namespace fs = boost::filesystem;
 
@@ -510,11 +512,11 @@ void Agent::send_task_push(
 
     auto push = instantiate_push(connectionID);
     proto::RPCPush message{};
-    message.set_version(1);
+    message.set_version(RPCPUSH_VERSION);
     message.set_type(proto::RPCPUSH_TASK);
     message.set_id(nymID);
     auto& task = *message.mutable_taskcomplete();
-    task.set_version(1);
+    task.set_version(TASKCOMPLETE_VERSION);
     task.set_id(taskID);
     task.set_result(result);
 
