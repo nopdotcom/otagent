@@ -67,7 +67,7 @@ set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -std=c11")
 
 if(${CMAKE_CXX_COMPILER_ID} MATCHES GNU)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
-  set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Wall -Wextra -pedantic -pedantic-errors -Wswitch-default -Wswitch-enum -Wcast-align -Wdisabled-optimization -Wmissing-declarations -Wmissing-field-initializers -Wunused-macros -Wundef -Wformat=2 -Wlogical-op -Wmissing-include-dirs")
+  set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Wall -Wextra -pedantic -pedantic-errors -Wswitch-default -Wcast-align -Wdisabled-optimization -Wmissing-declarations -Wmissing-field-initializers -Wunused-macros -Wundef -Wformat=2 -Wlogical-op -Wmissing-include-dirs")
   set(PEDANTIC_CXX_FLAGS "${PEDANTIC_CXX_FLAGS} -Weffc++ -Wctor-dtor-privacy -Wold-style-cast -Woverloaded-virtual -Wsynth -Wnoexcept -Wstrict-null-sentinel")
 elseif(${CMAKE_CXX_COMPILER_ID} MATCHES Clang)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1z")
