@@ -429,12 +429,12 @@ int main(int argc, char** argv)
         settings_path,
         root));
     std::function<void()> shutdowncallback = [&otagent]() -> void {
-        opentxs::otOut << std::endl << "Shutting down..." << std::endl;
+					       // opentxs::otOut << std::endl << "Shutting down..." << std::endl;
         otagent.reset();
     };
     opentxs::OT::App().HandleSignals(&shutdowncallback);
     opentxs::OT::Join();
-    opentxs::otOut << "Finished." << std::endl;
+    // opentxs::otOut << "Finished." << std::endl;
     cleanup_globals();
 
     return 0;
