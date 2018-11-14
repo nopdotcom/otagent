@@ -34,6 +34,8 @@ extern "C" {
 #define CONFIG_CLIENT_PRIVKEY "client_privkey"
 #define CONFIG_CLIENT_PUBKEY "client_pubkey"
 
+#define OT_METHOD "opentxs::"
+
 namespace po = boost::program_options;
 namespace pt = boost::property_tree;
 namespace fs = boost::filesystem;
@@ -429,12 +431,14 @@ int main(int argc, char** argv)
         settings_path,
         root));
     std::function<void()> shutdowncallback = [&otagent]() -> void {
-        opentxs::otOut << std::endl << "Shutting down..." << std::endl;
+        opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(
+	     ": Shutting down...").Flush();
         otagent.reset();
     };
     opentxs::OT::App().HandleSignals(&shutdowncallback);
     opentxs::OT::Join();
-    opentxs::otOut << "Finished." << std::endl;
+    opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(
+	     ": Finished.").Flush();
     cleanup_globals();
 
     return 0;
