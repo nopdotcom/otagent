@@ -422,7 +422,7 @@ int main(int argc, char** argv)
         ot,
         clients,
         servers,
-        socket_path,
+        std::string("ipc://") + socket_path,
         endpoints,
         server_private_key,
         server_public_key,
@@ -431,14 +431,13 @@ int main(int argc, char** argv)
         settings_path,
         root));
     std::function<void()> shutdowncallback = [&otagent]() -> void {
-        opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(
-	     ": Shutting down...").Flush();
+        opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(": Shutting down...")
+            .Flush();
         otagent.reset();
     };
     opentxs::OT::App().HandleSignals(&shutdowncallback);
     opentxs::OT::Join();
-    opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(
-	     ": Finished.").Flush();
+    opentxs::LogNormal(OT_METHOD)(__FUNCTION__)(": Finished.").Flush();
     cleanup_globals();
 
     return 0;

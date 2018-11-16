@@ -132,7 +132,7 @@ Agent::Agent(
 
     OT_ASSERT(set);
 
-    started = frontend_->Start("ipc://" + socket_path_);
+    started = frontend_->Start(socket_path_);
 
     OT_ASSERT(started);
 
@@ -305,6 +305,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETSERVERPASSWORD:
         case proto::RPCCOMMAND_GETADMINNYM:
         case proto::RPCCOMMAND_GETUNITDEFINITION:
+        case proto::RPCCOMMAND_GETTRANSACTIONDATA:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
