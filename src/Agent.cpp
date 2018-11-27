@@ -307,6 +307,7 @@ OTZMQMessage Agent::backend_handler(const zmq::Message& message)
         case proto::RPCCOMMAND_GETUNITDEFINITION:
         case proto::RPCCOMMAND_GETTRANSACTIONDATA:
         case proto::RPCCOMMAND_LOOKUPACCOUNTID:
+        case proto::RPCCOMMAND_RENAMEACCOUNT:
         case proto::RPCCOMMAND_ERROR:
         default: {
         }
