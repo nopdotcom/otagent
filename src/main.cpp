@@ -227,9 +227,9 @@ std::string find_home()
     }
 
     if (home_directory.empty()) {
-        opentxs::otErr << __FUNCTION__
-                       << ": Unable to determine the home directory."
-                       << std::endl;
+        opentxs::LogOutput(OT_METHOD)(__FUNCTION__)(
+                       ": Unable to determine the home directory.")
+                       .Flush();
     }
 #endif
     return home_directory;
