@@ -371,17 +371,17 @@ int main(int argc, char** argv)
            << "\n";
         ss << R"~(    ")~" << CONFIG_SERVER_PUBKEY;
         ss << R"~(": ")~";
-        ss << server_public_key;
+        ss << server_public_key.c_str();
         ss << R"~(",)~"
            << "\n";
         ss << R"~(    ")~" << CONFIG_CLIENT_PRIVKEY;
         ss << R"~(": ")~";
-        ss << client_private_key;
+        ss << client_private_key.c_str();
         ss << R"~(",)~"
            << "\n";
         ss << R"~(    ")~" << CONFIG_CLIENT_PUBKEY;
         ss << R"~(": ")~";
-        ss << client_public_key;
+        ss << client_public_key.c_str();
         ss << R"~(")~"
            << "\n";
         ss << R"~(  })~"
